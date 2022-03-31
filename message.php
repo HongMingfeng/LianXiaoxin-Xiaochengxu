@@ -1,7 +1,7 @@
 <?php
 
 /**
- * ECSHOP 留言板
+ * ECSHOP  管理中心管理员留言程序
  * ============================================================================
  * * 版权所有 2005-2012 上海商派网络科技有限公司，并保留所有权利。
  * 网站地址: http://www.ecshop.com；
@@ -17,234 +17,356 @@ define('IN_ECS', true);
 
 require(dirname(__FILE__) . '/includes/init.php');
 
-if (empty($_CFG['message_board']))
+/* act操作项的初始化 */
+$_REQUEST['act'] = trim($_REQUEST['act']);
+if (empty($_REQUEST['act']))
 {
-    show_message($_LANG['message_board_close']);
-}
-$action  = isset($_REQUEST['act']) ? trim($_REQUEST['act']) : 'default';
-if ($action == 'act_add_message')
-{
-    include_once(ROOT_PATH . 'includes/lib_clips.php');
-
-    /* 验证码防止灌水刷屏 */
-    if ((intval($_CFG['captcha']) & CAPTCHA_MESSAGE) && gd_version() > 0)
-    {
-        include_once('includes/cls_captcha.php');
-        $validator = new captcha();
-        if (!$validator->check_word($_POST['captcha']))
-        {
-            show_message($_LANG['invalid_captcha']);
-        }
-    }
-    else
-    {
-        /* 没有验证码时，用时间来限制机器人发帖或恶意发评论 */
-        if (!isset($_SESSION['send_time']))
-        {
-            $_SESSION['send_time'] = 0;
-        }
-
-        $cur_time = gmtime();
-        if (($cur_time - $_SESSION['send_time']) < 30) // 小于30秒禁止发评论
-        {
-            show_message($_LANG['cmt_spam_warning']);
-        }
-    }
-    $user_name = '';
-    if (empty($_POST['anonymous']) && !empty($_SESSION['user_name']))
-    {
-        $user_name = $_SESSION['user_name'];
-    }
-    elseif (!empty($_POST['anonymous']) && !isset($_POST['user_name']))
-    {
-        $user_name = $_LANG['anonymous'];
-    }
-    elseif (empty($_POST['user_name']))
-    {
-        $user_name = $_LANG['anonymous'];
-    }
-    else
-    {
-        $user_name = htmlspecialchars(trim($_POST['user_name']));
-    }
-
-    $user_id = !empty($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
-    $message = array(
-        'user_id'     => $user_id,
-        'user_name'   => $user_name,
-        'user_email'  => isset($_POST['user_email']) ? htmlspecialchars(trim($_POST['user_email']))     : '',
-        'msg_type'    => isset($_POST['msg_type']) ? intval($_POST['msg_type'])     : 0,
-        'msg_title'   => isset($_POST['msg_title']) ? trim($_POST['msg_title'])     : '',
-        'msg_content' => isset($_POST['msg_content']) ? trim($_POST['msg_content']) : '',
-        'order_id'    => 0,
-        'msg_area'    => 1,
-        'upload'      => array()
-     );
-
-    if (add_message($message))
-    {
-        if (intval($_CFG['captcha']) & CAPTCHA_MESSAGE)
-        {
-            unset($_SESSION[$validator->session_word]);
-        }
-        else
-        {
-            $_SESSION['send_time'] = $cur_time;
-        }
-        $msg_info = $_CFG['message_check'] ? $_LANG['message_submit_wait'] : $_LANG['message_submit_done'];
-        show_message($msg_info, $_LANG['message_list_lnk'], 'message.php');
-    }
-    else
-    {
-        $err->show($_LANG['message_list_lnk'], 'message.php');
-    }
+    $_REQUEST['act'] = 'list';
 }
 
-if ($action == 'default')
+/*------------------------------------------------------ */
+//-- 留言列表页面
+/*------------------------------------------------------ */
+if ($_REQUEST['act'] == 'list')
 {
-    assign_template();
-    $position = assign_ur_here(0, $_LANG['message_board']);
-    $smarty->assign('page_title', $position['title']);    // 页面标题
-    $smarty->assign('ur_here',    $position['ur_here']);  // 当前位置
-    $smarty->assign('helps',      get_shop_help());       // 网店帮助
+    $smarty->assign('full_page',   1);
+    $smarty->assign('ur_here',     $_LANG['msg_list']);
+    $smarty->assign('action_link', array('text' => $_LANG['send_msg'], 'href' => 'message.php?act=send'));
 
-    $smarty->assign('categories', get_categories_tree()); // 分类树
-    $smarty->assign('top_goods',  get_top10());           // 销售排行
-    $smarty->assign('cat_list',   cat_list(0, 0, true, 2, false));
-    $smarty->assign('brand_list', get_brand_list());
-    $smarty->assign('promotion_info', get_promotion_info());
+    $list = get_message_list();
 
-    $smarty->assign('enabled_mes_captcha', (intval($_CFG['captcha']) & CAPTCHA_MESSAGE));
+    $smarty->assign('message_list', $list['item']);
+    $smarty->assign('filter',       $list['filter']);
+    $smarty->assign('record_count', $list['record_count']);
+    $smarty->assign('page_count',   $list['page_count']);
 
-    $sql = "SELECT COUNT(*) FROM " .$GLOBALS['ecs']->table('comment')." WHERE STATUS =1 AND comment_type =0 ";
-    $record_count = $db->getOne($sql);
-    $sql = "SELECT COUNT(*) FROM " .$GLOBALS['ecs']->table('feedback')." WHERE `msg_area`='1' AND `msg_status` = '1' ";
-    $record_count += $db->getOne($sql);
+    $sort_flag  = sort_flag($list['filter']);
+    $smarty->assign($sort_flag['tag'], $sort_flag['img']);
 
-    /* 获取留言的数量 */
-    $page = isset($_REQUEST['page']) ? intval($_REQUEST['page']) : 1;
-    $pagesize = get_library_number('message_list', 'message_board');
-    $pager = get_pager('message.php', array(), $record_count, $page, $pagesize);
-    $msg_lists = get_msg_list($pagesize, $pager['start']);
-    assign_dynamic('message_board');
-    $smarty->assign('rand',      mt_rand());
-    $smarty->assign('msg_lists', $msg_lists);
-    $smarty->assign('pager', $pager);
-    $smarty->display('message_board.dwt');
+    assign_query_info();
+    $smarty->display('message_list.htm');
+}
+
+/*------------------------------------------------------ */
+//-- 翻页、排序
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'query')
+{
+    $list = get_message_list();
+
+    $smarty->assign('message_list', $list['item']);
+    $smarty->assign('filter',       $list['filter']);
+    $smarty->assign('record_count', $list['record_count']);
+    $smarty->assign('page_count',   $list['page_count']);
+
+    $sort_flag  = sort_flag($list['filter']);
+    $smarty->assign($sort_flag['tag'], $sort_flag['img']);
+
+    make_json_result($smarty->fetch('message_list.htm'), '',
+        array('filter' => $list['filter'], 'page_count' => $list['page_count']));
+}
+
+/*------------------------------------------------------ */
+//-- 留言发送页面
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'send')
+{
+    /* 获取管理员列表 */
+    $admin_list = $db->getAll('SELECT user_id, user_name FROM ' .$ecs->table('admin_user'));
+
+    $smarty->assign('ur_here',     $_LANG['send_msg']);
+    $smarty->assign('action_link', array('href' => 'message.php?act=list', 'text' => $_LANG['msg_list']));
+    $smarty->assign('action',      'add');
+    $smarty->assign('form_act',    'insert');
+    $smarty->assign('admin_list',  $admin_list);
+
+    assign_query_info();
+    $smarty->display('message_info.htm');
+}
+
+/*------------------------------------------------------ */
+//-- 处理留言的发送
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'insert')
+{
+    $rec_arr = $_POST['receiver_id'];
+
+    /* 向所有管理员发送留言 */
+    if ($rec_arr[0] == 0)
+    {
+        /* 获取管理员信息 */
+        $result = $db->query('SELECT user_id FROM ' .$ecs->table('admin_user') . 'WHERE user_id !=' . $_SESSION['admin_id']);
+        while ($rows = $db->FetchRow($result))
+        {
+            $sql = "INSERT INTO " .$ecs->table('admin_message'). " (sender_id, receiver_id, sent_time, " .
+                            "read_time, readed, deleted, title, message) ".
+                        "VALUES ('".$_SESSION['admin_id']."', '".$rows['user_id']."', '" .gmtime(). "', ".
+                            "0, '0', '0', '$_POST[title]', '$_POST[message]')";
+            $db->query($sql);
+        }
+
+        /*添加链接*/
+        $link[0]['text'] = $_LANG['back_list'];
+        $link[0]['href'] = 'message.php?act=list';
+
+        $link[1]['text'] = $_LANG['continue_send_msg'];
+        $link[1]['href'] = 'message.php?act=send';
+
+        sys_msg($_LANG['send_msg'] . "&nbsp;" . $_LANG['action_succeed'],0, $link);
+
+        /* 记录管理员操作 */
+        admin_log(admin_log($_LANG['send_msg']), 'add', 'admin_message');
+    }
+    else
+    {
+        /* 如果是发送给指定的管理员 */
+        foreach ($rec_arr AS $key => $id)
+        {
+            $sql = "INSERT INTO " .$ecs->table('admin_message'). " (sender_id, receiver_id, ".
+                        "sent_time, read_time, readed, deleted, title, message) ".
+                   "VALUES ('".$_SESSION['admin_id']."', '$id', '".gmtime()."', ".
+                        "'0', '0', '0', '$_POST[title]', '$_POST[message]')";
+            $db->query($sql);
+        }
+        admin_log(addslashes($_LANG['send_msg']), 'add', 'admin_message');
+
+        $link[0]['text'] = $_LANG['back_list'];
+        $link[0]['href'] = 'message.php?act=list';
+        $link[1]['text'] = $_LANG['continue_send_msg'];
+        $link[1]['href'] = 'message.php?act=send';
+
+        sys_msg($_LANG['send_msg'] . "&nbsp;" . $_LANG['action_succeed'],0, $link);
+    }
+}
+/*------------------------------------------------------ */
+//-- 留言编辑页面
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'edit')
+{
+    $id = intval($_REQUEST['id']);
+
+    /* 获取管理员列表 */
+    $admin_list = $db->getAll('SELECT user_id, user_name FROM ' .$ecs->table('admin_user'));
+
+    /* 获得留言数据*/
+    $sql = 'SELECT message_id, receiver_id, title, message'.
+           'FROM ' .$ecs->table('admin_message'). " WHERE message_id='$id'";
+    $msg_arr = $db->getRow($sql);
+
+    $smarty->assign('ur_here',     $_LANG['edit_msg']);
+    $smarty->assign('action_link', array('href' => 'message.php?act=list', 'text' => $_LANG['msg_list']));
+    $smarty->assign('form_act',    'update');
+    $smarty->assign('admin_list',  $admin_list);
+    $smarty->assign('msg_arr',     $msg_arr);
+
+    assign_query_info();
+    $smarty->display('message_info.htm');
+}
+elseif ($_REQUEST['act'] == 'update')
+{
+    /* 获得留言数据*/
+    $msg_arr = array();
+    $msg_arr = $db->getRow('SELECT * FROM ' .$ecs->table('admin_message')." WHERE message_id='$_POST[id]'");
+
+    $sql = "UPDATE " .$ecs->table('admin_message'). " SET ".
+           "title = '$_POST[title]',".
+           "message = '$_POST[message]'".
+           "WHERE sender_id = '$msg_arr[sender_id]' AND sent_time='$msg_arr[send_time]'";
+    $db->query($sql);
+
+    $link[0]['text'] = $_LANG['back_list'];
+    $link[0]['href'] = 'message.php?act=list';
+
+    sys_msg($_LANG['edit_msg'] . ' ' . $_LANG['action_succeed'],0, $link);
+
+    /* 记录管理员操作 */
+    admin_log(addslashes($_LANG['edit_msg']), 'edit', 'admin_message');
+}
+
+/*------------------------------------------------------ */
+//-- 留言查看页面
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'view')
+{
+    $msg_id = intval($_REQUEST['id']);
+
+    /* 获得管理员留言数据 */
+    $msg_arr = array();
+    $sql     = "SELECT a.*, b.user_name ".
+               "FROM " .$ecs->table('admin_message')." AS a ".
+               "LEFT JOIN " .$ecs->table('admin_user')." AS b ON b.user_id = a.sender_id ".
+               "WHERE a.message_id = '$msg_id'";
+    $msg_arr = $db->getRow($sql);
+    $msg_arr['title']   = nl2br(htmlspecialchars($msg_arr['title']));
+    $msg_arr['message'] = nl2br(htmlspecialchars($msg_arr['message']));
+
+    /* 如果还未阅读 */
+    if ($msg_arr['readed'] == 0)
+    {
+        $msg_arr['read_time'] = gmtime(); //阅读日期为当前日期
+
+        //更新阅读日期和阅读状态
+        $sql = "UPDATE " .$ecs->table('admin_message'). " SET ".
+               "read_time = '" . $msg_arr['read_time'] . "', ".
+               "readed = '1' ".
+               "WHERE message_id = '$msg_id'";
+        $db->query($sql);
+    }
+
+    //模板赋值，显示
+    $smarty->assign('ur_here',     $_LANG['view_msg']);
+    $smarty->assign('action_link', array('href' => 'message.php?act=list', 'text' => $_LANG['msg_list']));
+    $smarty->assign('admin_user',  $_SESSION['admin_name']);
+    $smarty->assign('msg_arr',     $msg_arr);
+
+    assign_query_info();
+    $smarty->display('message_view.htm');
+}
+
+/*------------------------------------------------------ */
+//--留言回复页面
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'reply')
+{
+    $msg_id = intval($_REQUEST['id']);
+
+    /* 获得留言数据 */
+    $msg_val = array();
+    $sql     = "SELECT a.*, b.user_name ".
+               "FROM " .$ecs->table('admin_message')." AS a ".
+               "LEFT JOIN " .$ecs->table('admin_user')." AS b ON b.user_id = a.sender_id ".
+               "WHERE a.message_id = '$msg_id'";
+    $msg_val = $db->getRow($sql);
+
+    $smarty->assign('ur_here',     $_LANG['reply_msg']);
+    $smarty->assign('action_link', array('href' => 'message.php?act=list', 'text' => $_LANG['msg_list']));
+
+    $smarty->assign('action',      'reply');
+    $smarty->assign('form_act',    're_msg');
+    $smarty->assign('msg_val',     $msg_val);
+
+    assign_query_info();
+    $smarty->display('message_info.htm');
+}
+
+/*------------------------------------------------------ */
+//--留言回复的处理
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 're_msg')
+{
+    $sql = "INSERT INTO " .$ecs->table('admin_message'). " (sender_id, receiver_id, sent_time, ".
+                "read_time, readed, deleted, title, message) ".
+           "VALUES ('".$_SESSION['admin_id']."', '$_POST[receiver_id]', '" . gmtime() . "', ".
+                "0, '0', '0', '$_POST[title]', '$_POST[message]')";
+    $db->query($sql);
+
+    $link[0]['text'] = $_LANG['back_list'];
+    $link[0]['href'] = 'message.php?act=list';
+
+    sys_msg($_LANG['send_msg'] . ' ' . $_LANG['action_succeed'],0, $link);
+
+    /* 记录管理员操作 */
+    admin_log(addslashes($_LANG['send_msg']), 'add', 'admin_message');
+}
+
+/*------------------------------------------------------ */
+//-- 批量删除留言记录
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'drop_msg')
+{
+    if (isset($_POST['checkboxes']))
+    {
+        $count = 0;
+        foreach ($_POST['checkboxes'] AS $key => $id)
+        {
+            $sql = "UPDATE " .$ecs->table('admin_message'). " SET ".
+                   "deleted = '1'".
+                   "WHERE message_id = '$id' AND (sender_id='$_SESSION[admin_id]' OR receiver_id='$_SESSION[admin_id]')";
+            $db->query($sql);
+
+            $count++;
+        }
+
+        admin_log('', 'remove', 'admin_message');
+        $link[] = array('text' => $_LANG['back_list'], 'href' => 'message.php?act=list');
+        sys_msg(sprintf($_LANG['batch_drop_success'], $count), 0, $link);
+    }
+    else
+    {
+        sys_msg($_LANG['no_select_msg'], 1);
+    }
+}
+
+/*------------------------------------------------------ */
+//-- 删除留言
+/*------------------------------------------------------ */
+elseif ($_REQUEST['act'] == 'remove')
+{
+    $id = intval($_GET['id']);
+
+    $sql = "UPDATE ".$ecs->table('admin_message')." SET deleted=1 ".
+            " WHERE message_id=$id AND (sender_id='$_SESSION[admin_id]' OR receiver_id='$_SESSION[admin_id]')";
+    $db->query($sql);
+
+    $url = 'message.php?act=query&' . str_replace('act=remove', '', $_SERVER['QUERY_STRING']);
+
+    ecs_header("Location: $url\n");
+    exit;
 }
 
 /**
- * 获取留言的详细信息
+ *  获取管理员留言列表
  *
- * @param   integer $num
- * @param   integer $start
- *
- * @return  array
+ * @return void
  */
-function get_msg_list($num, $start)
+function get_message_list()
 {
-    /* 获取留言数据 */
-    $msg = array();
-        
-    $mysql_ver = $GLOBALS['db']->version();
-    
-    if($mysql_ver > '3.2.3')
+    /* 查询条件 */
+    $filter['sort_by']    = empty($_REQUEST['sort_by'])    ? 'sent_time' : trim($_REQUEST['sort_by']);
+    $filter['sort_order'] = empty($_REQUEST['sort_order']) ? 'DESC' : trim($_REQUEST['sort_order']);
+    $filter['msg_type']   = empty($_REQUEST['msg_type'])   ? 0 : intval($_REQUEST['msg_type']);
+
+    /* 查询条件 */
+    switch ($filter['msg_type'])
     {
-        $sql = "(SELECT 'comment' AS tablename,   comment_id AS ID, content AS msg_content, null AS msg_title, add_time AS msg_time, id_value AS id_value, comment_rank AS comment_rank, null AS message_img, user_name AS user_name, '6' AS msg_type ";
-        $sql .= " FROM " .$GLOBALS['ecs']->table('comment');
-        $sql .= "WHERE STATUS =1 AND comment_type =0) ";
-        $sql .= " UNION ";
-        $sql .= "(SELECT 'feedback' AS tablename, msg_id AS ID, msg_content AS msg_content, msg_title AS msg_title, msg_time AS msg_time, null AS id_value, null AS comment_rank, message_img AS message_img, user_name AS user_name, msg_type AS msg_type ";
-        $sql .= " FROM " .$GLOBALS['ecs']->table('feedback');
-        $sql .= " WHERE `msg_area`='1' AND `msg_status` = '1') ";
-        $sql .= " ORDER BY msg_time DESC ";
-    }
-    else 
-    {
-        $con_sql = "SELECT 'comment' AS tablename,   comment_id AS ID, content AS msg_content, null AS msg_title, add_time AS msg_time, id_value AS id_value, comment_rank AS comment_rank, null AS message_img, user_name AS user_name, '6' AS msg_type ";
-        $con_sql .= " FROM " .$GLOBALS['ecs']->table('comment');
-        $con_sql .= "WHERE STATUS =1 AND comment_type =0 ";
-    
-        $fee_sql = "SELECT 'feedback' AS tablename, msg_id AS ID, msg_content AS msg_content, msg_title AS msg_title, msg_time AS msg_time, null AS id_value, null AS comment_rank, message_img AS message_img, user_name AS user_name, msg_type AS msg_type ";
-        $fee_sql .= " FROM " .$GLOBALS['ecs']->table('feedback');
-        $fee_sql .= " WHERE `msg_area`='1' AND `msg_status` = '1' ";
-    
-        
-        $cre_con = "CREATE TEMPORARY TABLE tmp_table ".$con_sql;
-        $GLOBALS['db']->query($cre_con);
-    
-        $cre_con = "INSERT INTO tmp_table ".$fee_sql;
-        $GLOBALS['db']->query($cre_con);
-    
-        $sql = "SELECT * FROM  " .$GLOBALS['ecs']->table('tmp_table') . " ORDER BY msg_time DESC ";
+        case 1:
+            $where = " a.receiver_id='" .$_SESSION['admin_id']. "'";
+            break;
+        case 2:
+           $where = " a.sender_id='".$_SESSION['admin_id']."' AND a.deleted='0'";
+           break;
+        case 3:
+           $where = " a.readed='0' AND a.receiver_id='".$_SESSION['admin_id']."' AND a.deleted='0'";
+           break;
+        case 4:
+           $where = " a.readed='1' AND a.receiver_id='".$_SESSION['admin_id']."' AND a.deleted='0'";
+           break;
+        default:
+           $where = " (a.receiver_id='".$_SESSION['admin_id']."' OR a.sender_id='" .$_SESSION['admin_id']. "') AND a.deleted='0'";
     }
 
-    $res = $GLOBALS['db']->SelectLimit($sql, $num, $start);
+    $sql = "SELECT COUNT(*) FROM ".$GLOBALS['ecs']->table('admin_message')." AS a WHERE 1 AND ". $where;
+    $filter['record_count'] = $GLOBALS['db']->getOne($sql);
 
-    while ($rows = $GLOBALS['db']->fetchRow($res))
+    /* 分页大小 */
+    $filter = page_and_size($filter);
+
+    $sql = "SELECT a.message_id,a.sender_id,a.receiver_id,a.sent_time,a.read_time,a.deleted,a.title,a.message,b.user_name".
+            " FROM ".$GLOBALS['ecs']->table('admin_message')." AS a,".$GLOBALS['ecs']->table('admin_user')." AS b ".
+            " WHERE a.sender_id=b.user_id AND $where ".
+            " ORDER BY ".$filter['sort_by']." ".$filter['sort_order'].
+            " LIMIT ". $filter['start'] .", $filter[page_size]";
+    $row = $GLOBALS['db']->getAll($sql);
+
+    foreach ($row AS $key=>$val)
     {
-        for($i = 0; $i < count($rows); $i++)
-        {
-        $msg[$rows['msg_time']]['user_name'] = htmlspecialchars($rows['user_name']);
-        $msg[$rows['msg_time']]['msg_content'] = str_replace('\r\n', '<br />', htmlspecialchars($rows['msg_content']));
-        $msg[$rows['msg_time']]['msg_content'] = str_replace('\n', '<br />', $msg[$rows['msg_time']]['msg_content']);
-        $msg[$rows['msg_time']]['msg_time']    = local_date($GLOBALS['_CFG']['time_format'], $rows['msg_time']);
-        $msg[$rows['msg_time']]['msg_type']    = $GLOBALS['_LANG']['message_type'][$rows['msg_type']];
-        $msg[$rows['msg_time']]['msg_title']   = nl2br(htmlspecialchars($rows['msg_title']));
-        $msg[$rows['msg_time']]['message_img'] = $rows['message_img'];
-        $msg[$rows['msg_time']]['tablename'] = $rows['tablename'];
-
-            if(isset($rows['order_id']))
-            {
-                 $msg[$rows['msg_time']]['order_id'] = $rows['order_id'];
-            }
-            $msg[$rows['msg_time']]['comment_rank'] = $rows['comment_rank'];
-            $msg[$rows['msg_time']]['id_value'] = $rows['id_value'];
-
-            /*如果id_value为true为商品评论,根据商品id取出商品名称*/
-            if($rows['id_value'])
-            {
-                $sql_goods = "SELECT goods_name FROM ".$GLOBALS['ecs']->table('goods');
-                $sql_goods .= "WHERE goods_id= ".$rows['id_value'];
-                $goods_res = $GLOBALS['db']->getRow($sql_goods);
-                $msg[$rows['msg_time']]['goods_name'] = $goods_res['goods_name'];
-                $msg[$rows['msg_time']]['goods_url'] = build_uri('goods', array('gid' => $rows['id_value']), $goods_res['goods_name']);
-            }
-        }
-
-        $msg[$rows['msg_time']]['tablename'] = $rows['tablename'];
-        $id = $rows['ID'];
-        $reply = array();
-        if(isset($msg[$rows['msg_time']]['tablename']))
-        {
-            $table_name = $msg[$rows['msg_time']]['tablename'];
-
-            if ($table_name == 'feedback')
-            {
-                $sql = "SELECT user_name AS re_name, user_email AS re_email, msg_time AS re_time, msg_content AS re_content ,parent_id".
-                 " FROM " .$GLOBALS['ecs']->table('feedback') .
-                 " WHERE parent_id = '" . $id. "'";
-            }
-            else
-            {
-                $sql = 'SELECT user_name AS re_name, email AS re_email, add_time AS re_time, content AS re_content ,parent_id
-                FROM ' . $GLOBALS['ecs']->table('comment') .
-                " WHERE parent_id = $id ";
-
-            }
-            $reply = $GLOBALS['db']->getRow($sql);
-            if ($reply)
-            {
-                $msg[$rows['msg_time']]['re_name']   = $reply['re_name'];
-                $msg[$rows['msg_time']]['re_email']  = $reply['re_email'];
-                $msg[$rows['msg_time']]['re_time']    = local_date($GLOBALS['_CFG']['time_format'], $reply['re_time']);
-                $msg[$rows['msg_time']]['re_content'] = nl2br(htmlspecialchars($reply['re_content']));
-            }
-        }
-
+        $row[$key]['sent_time'] = local_date($GLOBALS['_CFG']['time_format'], $val['sent_time']);
+        $row[$key]['read_time'] = local_date($GLOBALS['_CFG']['time_format'], $val['read_time']);
     }
 
-    return $msg;
+    $arr = array('item' => $row, 'filter' => $filter, 'page_count' => $filter['page_count'], 'record_count' => $filter['record_count']);
+
+    return $arr;
 }
 
 ?>
