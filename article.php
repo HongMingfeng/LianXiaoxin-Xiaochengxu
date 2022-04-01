@@ -1,7 +1,7 @@
 <?php
 
 /**
- * ECSHOP 管理中心文章处理程序文件
+ * ECSHOP 文章内容
  * ============================================================================
  * * 版权所有 2005-2012 上海商派网络科技有限公司，并保留所有权利。
  * 网站地址: http://www.ecshop.com；
@@ -16,690 +16,200 @@
 define('IN_ECS', true);
 
 require(dirname(__FILE__) . '/includes/init.php');
-require_once(ROOT_PATH . "includes/fckeditor/fckeditor.php");
-require_once(ROOT_PATH . 'includes/cls_image.php');
 
-/*初始化数据交换对象 */
-$exc   = new exchange($ecs->table("article"), $db, 'article_id', 'title');
-//$image = new cls_image();
-
-/* 允许上传的文件类型 */
-$allow_file_types = '|GIF|JPG|PNG|BMP|SWF|DOC|XLS|PPT|MID|WAV|ZIP|RAR|PDF|CHM|RM|TXT|';
-
-/*------------------------------------------------------ */
-//-- 文章列表
-/*------------------------------------------------------ */
-if ($_REQUEST['act'] == 'list')
+if ((DEBUG_MODE & 2) != 2)
 {
-    /* 取得过滤条件 */
-    $filter = array();
-    $smarty->assign('cat_select',  article_cat_list(0));
-    $smarty->assign('ur_here',      $_LANG['03_article_list']);
-    $smarty->assign('action_link',  array('text' => $_LANG['article_add'], 'href' => 'article.php?act=add'));
-    $smarty->assign('full_page',    1);
-    $smarty->assign('filter',       $filter);
-
-    $article_list = get_articleslist();
-
-    $smarty->assign('article_list',    $article_list['arr']);
-    $smarty->assign('filter',          $article_list['filter']);
-    $smarty->assign('record_count',    $article_list['record_count']);
-    $smarty->assign('page_count',      $article_list['page_count']);
-
-    $sort_flag  = sort_flag($article_list['filter']);
-    $smarty->assign($sort_flag['tag'], $sort_flag['img']);
-
-    assign_query_info();
-    $smarty->display('article_list.htm');
+    $smarty->caching = true;
 }
 
 /*------------------------------------------------------ */
-//-- 翻页，排序
+//-- INPUT
 /*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'query')
+
+$_REQUEST['id'] = isset($_REQUEST['id']) ? intval($_REQUEST['id']) : 0;
+$article_id     = $_REQUEST['id'];
+if(isset($_REQUEST['cat_id']) && $_REQUEST['cat_id'] < 0)
 {
-    check_authz_json('article_manage');
-
-    $article_list = get_articleslist();
-
-    $smarty->assign('article_list',    $article_list['arr']);
-    $smarty->assign('filter',          $article_list['filter']);
-    $smarty->assign('record_count',    $article_list['record_count']);
-    $smarty->assign('page_count',      $article_list['page_count']);
-
-    $sort_flag  = sort_flag($article_list['filter']);
-    $smarty->assign($sort_flag['tag'], $sort_flag['img']);
-
-    make_json_result($smarty->fetch('article_list.htm'), '',
-        array('filter' => $article_list['filter'], 'page_count' => $article_list['page_count']));
+    $article_id = $db->getOne("SELECT article_id FROM " . $ecs->table('article') . " WHERE cat_id = '".intval($_REQUEST['cat_id'])."' ");
 }
 
 /*------------------------------------------------------ */
-//-- 添加文章
+//-- PROCESSOR
 /*------------------------------------------------------ */
-if ($_REQUEST['act'] == 'add')
+
+$cache_id = sprintf('%X', crc32($_REQUEST['id'] . '-' . $_CFG['lang']));
+
+if (!$smarty->is_cached('article.dwt', $cache_id))
 {
-    /* 权限判断 */
-    admin_priv('article_manage');
+    /* 文章详情 */
+    $article = get_article_info($article_id);
 
-    /* 创建 html editor */
-    create_html_editor('FCKeditor1');
-
-    /*初始化*/
-    $article = array();
-    $article['is_open'] = 1;
-
-    /* 取得分类、品牌 */
-    $smarty->assign('goods_cat_list', cat_list());
-    $smarty->assign('brand_list',     get_brand_list());
-
-    /* 清理关联商品 */
-    $sql = "DELETE FROM " . $ecs->table('goods_article') . " WHERE article_id = 0";
-    $db->query($sql);
-
-    if (isset($_GET['id']))
+    if (empty($article))
     {
-        $smarty->assign('cur_id',  $_GET['id']);
-    }
-    $smarty->assign('article',     $article);
-    $smarty->assign('cat_select',  article_cat_list(0));
-    $smarty->assign('ur_here',     $_LANG['article_add']);
-    $smarty->assign('action_link', array('text' => $_LANG['03_article_list'], 'href' => 'article.php?act=list'));
-    $smarty->assign('form_action', 'insert');
-
-    assign_query_info();
-    $smarty->display('article_info.htm');
-}
-
-/*------------------------------------------------------ */
-//-- 添加文章
-/*------------------------------------------------------ */
-if ($_REQUEST['act'] == 'insert')
-{
-    /* 权限判断 */
-    admin_priv('article_manage');
-
-    /*检查是否重复*/
-    $is_only = $exc->is_only('title', $_POST['title'],0, " cat_id ='$_POST[article_cat]'");
-
-    if (!$is_only)
-    {
-        sys_msg(sprintf($_LANG['title_exist'], stripslashes($_POST['title'])), 1);
+        ecs_header("Location: ./\n");
+        exit;
     }
 
-    /* 取得文件地址 */
-    $file_url = '';
-    if ((isset($_FILES['file']['error']) && $_FILES['file']['error'] == 0) || (!isset($_FILES['file']['error']) && isset($_FILES['file']['tmp_name']) && $_FILES['file']['tmp_name'] != 'none'))
+    if (!empty($article['link']) && $article['link'] != 'http://' && $article['link'] != 'https://')
     {
-        // 检查文件格式
-        if (!check_file_type($_FILES['file']['tmp_name'], $_FILES['file']['name'], $allow_file_types))
+        ecs_header("location:$article[link]\n");
+        exit;
+    }
+
+    $smarty->assign('article_categories',   article_categories_tree($article['cat_id'])); //文章分类树
+
+    $smarty->assign('categories',       get_categories_tree());  // 分类树
+    $smarty->assign('helps',            get_shop_help()); // 网店帮助
+
+    $smarty->assign('top_goods',        get_top10());    // 销售排行
+    $smarty->assign('best_goods',       get_recommend_goods('best'));       // 推荐商品
+    $smarty->assign('new_goods',        get_recommend_goods('new'));        // 最新商品
+    $smarty->assign('hot_goods',        get_recommend_goods('hot'));        // 热点文章
+    $smarty->assign('promotion_goods',  get_promote_goods());    // 特价商品
+    $smarty->assign('related_goods',    article_related_goods($_REQUEST['id']));  // 特价商品
+    $smarty->assign('id',               $article_id);
+    $smarty->assign('username',         $_SESSION['user_name']);
+    $smarty->assign('email',            $_SESSION['email']);
+    $smarty->assign('type',            '1');
+    $smarty->assign('promotion_info', get_promotion_info());
+
+    /* 验证码相关设置 */
+    if ((intval($_CFG['captcha']) & CAPTCHA_COMMENT) && gd_version() > 0)
+    {
+        $smarty->assign('enabled_captcha', 1);
+        $smarty->assign('rand',            mt_rand());
+    }
+
+    $smarty->assign('article',      $article);
+    $smarty->assign('keywords',     htmlspecialchars($article['keywords']));
+    $smarty->assign('description', htmlspecialchars($article['description']));
+
+    $catlist = array();
+    foreach(get_article_parent_cats($article['cat_id']) as $k=>$v)
+    {
+        $catlist[] = $v['cat_id'];
+    }
+
+    assign_template('a', $catlist);
+
+    $position = assign_ur_here($article['cat_id'], $article['title']);
+    $smarty->assign('page_title',   $position['title']);    // 页面标题
+    $smarty->assign('ur_here',      $position['ur_here']);  // 当前位置
+    $smarty->assign('comment_type', 1);
+
+    /* 相关商品 */
+    $sql = "SELECT a.goods_id, g.goods_name " .
+            "FROM " . $ecs->table('goods_article') . " AS a, " . $ecs->table('goods') . " AS g " .
+            "WHERE a.goods_id = g.goods_id " .
+            "AND a.article_id = '$_REQUEST[id]' ";
+    $smarty->assign('goods_list', $db->getAll($sql));
+
+    /* 上一篇下一篇文章 */
+    $next_article = $db->getRow("SELECT article_id, title FROM " .$ecs->table('article'). " WHERE article_id > $article_id AND cat_id=$article[cat_id] AND is_open=1 LIMIT 1");
+    if (!empty($next_article))
+    {
+        $next_article['url'] = build_uri('article', array('aid'=>$next_article['article_id']), $next_article['title']);
+        $smarty->assign('next_article', $next_article);
+    }
+
+    $prev_aid = $db->getOne("SELECT max(article_id) FROM " . $ecs->table('article') . " WHERE article_id < $article_id AND cat_id=$article[cat_id] AND is_open=1");
+    if (!empty($prev_aid))
+    {
+        $prev_article = $db->getRow("SELECT article_id, title FROM " .$ecs->table('article'). " WHERE article_id = $prev_aid");
+        $prev_article['url'] = build_uri('article', array('aid'=>$prev_article['article_id']), $prev_article['title']);
+        $smarty->assign('prev_article', $prev_article);
+    }
+
+    assign_dynamic('article');
+}
+if(isset($article) && $article['cat_id'] > 2)
+{
+    $smarty->display('article.dwt', $cache_id);
+}
+else
+{
+    $smarty->display('article_pro.dwt', $cache_id);
+}
+
+/*------------------------------------------------------ */
+//-- PRIVATE FUNCTION
+/*------------------------------------------------------ */
+
+/**
+ * 获得指定的文章的详细信息
+ *
+ * @access  private
+ * @param   integer     $article_id
+ * @return  array
+ */
+function get_article_info($article_id)
+{
+    /* 获得文章的信息 */
+    $sql = "SELECT a.*, IFNULL(AVG(r.comment_rank), 0) AS comment_rank ".
+            "FROM " .$GLOBALS['ecs']->table('article'). " AS a ".
+            "LEFT JOIN " .$GLOBALS['ecs']->table('comment'). " AS r ON r.id_value = a.article_id AND comment_type = 1 ".
+            "WHERE a.is_open = 1 AND a.article_id = '$article_id' GROUP BY a.article_id";
+    $row = $GLOBALS['db']->getRow($sql);
+
+    if ($row !== false)
+    {
+        $row['comment_rank'] = ceil($row['comment_rank']);                              // 用户评论级别取整
+        $row['add_time']     = local_date($GLOBALS['_CFG']['date_format'], $row['add_time']); // 修正添加时间显示
+
+        /* 作者信息如果为空，则用网站名称替换 */
+        if (empty($row['author']) || $row['author'] == '_SHOPHELP')
         {
-            sys_msg($_LANG['invalid_file']);
-        }
-
-        // 复制文件
-        $res = upload_article_file($_FILES['file']);
-        if ($res != false)
-        {
-            $file_url = $res;
-        }
-    }
-
-    if ($file_url == '')
-    {
-        $file_url = $_POST['file_url'];
-    }
-
-    /* 计算文章打开方式 */
-    if ($file_url == '')
-    {
-        $open_type = 0;
-    }
-    else
-    {
-        $open_type = $_POST['FCKeditor1'] == '' ? 1 : 2;
-    }
-
-    /*插入数据*/
-    $add_time = gmtime();
-    if (empty($_POST['cat_id']))
-    {
-        $_POST['cat_id'] = 0;
-    }
-    $sql = "INSERT INTO ".$ecs->table('article')."(title, cat_id, article_type, is_open, author, ".
-                "author_email, keywords, content, add_time, file_url, open_type, link, description) ".
-            "VALUES ('$_POST[title]', '$_POST[article_cat]', '$_POST[article_type]', '$_POST[is_open]', ".
-                "'$_POST[author]', '$_POST[author_email]', '$_POST[keywords]', '$_POST[FCKeditor1]', ".
-                "'$add_time', '$file_url', '$open_type', '$_POST[link_url]', '$_POST[description]')";
-    $db->query($sql);
-
-    /* 处理关联商品 */
-    $article_id = $db->insert_id();
-    $sql = "UPDATE " . $ecs->table('goods_article') . " SET article_id = '$article_id' WHERE article_id = 0";
-    $db->query($sql);
-
-    $link[0]['text'] = $_LANG['continue_add'];
-    $link[0]['href'] = 'article.php?act=add';
-
-    $link[1]['text'] = $_LANG['back_list'];
-    $link[1]['href'] = 'article.php?act=list';
-
-    admin_log($_POST['title'],'add','article');
-
-    clear_cache_files(); // 清除相关的缓存文件
-
-    sys_msg($_LANG['articleadd_succeed'],0, $link);
-}
-
-/*------------------------------------------------------ */
-//-- 编辑
-/*------------------------------------------------------ */
-if ($_REQUEST['act'] == 'edit')
-{
-    /* 权限判断 */
-    admin_priv('article_manage');
-
-    /* 取文章数据 */
-    $sql = "SELECT * FROM " .$ecs->table('article'). " WHERE article_id='$_REQUEST[id]'";
-    $article = $db->GetRow($sql);
-
-    /* 创建 html editor */
-    create_html_editor('FCKeditor1',$article['content']);
-
-    /* 取得分类、品牌 */
-    $smarty->assign('goods_cat_list', cat_list());
-    $smarty->assign('brand_list', get_brand_list());
-
-    /* 取得关联商品 */
-    $goods_list = get_article_goods($_REQUEST['id']);
-    $smarty->assign('goods_list', $goods_list);
-
-    $smarty->assign('article',     $article);
-    $smarty->assign('cat_select',  article_cat_list(0, $article['cat_id']));
-    $smarty->assign('ur_here',     $_LANG['article_edit']);
-    $smarty->assign('action_link', array('text' => $_LANG['03_article_list'], 'href' => 'article.php?act=list&' . list_link_postfix()));
-    $smarty->assign('form_action', 'update');
-
-    assign_query_info();
-    $smarty->display('article_info.htm');
-}
-
-if ($_REQUEST['act'] =='update')
-{
-    /* 权限判断 */
-    admin_priv('article_manage');
-
-    /*检查文章名是否相同*/
-    $is_only = $exc->is_only('title', $_POST['title'], $_POST['id'], "cat_id = '$_POST[article_cat]'");
-
-    if (!$is_only)
-    {
-        sys_msg(sprintf($_LANG['title_exist'], stripslashes($_POST['title'])), 1);
-    }
-
-
-    if (empty($_POST['cat_id']))
-    {
-        $_POST['cat_id'] = 0;
-    }
-
-    /* 取得文件地址 */
-    $file_url = '';
-    if (empty($_FILES['file']['error']) || (!isset($_FILES['file']['error']) && isset($_FILES['file']['tmp_name']) && $_FILES['file']['tmp_name'] != 'none'))
-    {
-        // 检查文件格式
-        if (!check_file_type($_FILES['file']['tmp_name'], $_FILES['file']['name'], $allow_file_types))
-        {
-            sys_msg($_LANG['invalid_file']);
-        }
-
-        // 复制文件
-        $res = upload_article_file($_FILES['file']);
-        if ($res != false)
-        {
-            $file_url = $res;
+            $row['author'] = $GLOBALS['_CFG']['shop_name'];
         }
     }
 
-    if ($file_url == '')
-    {
-        $file_url = $_POST['file_url'];
-    }
-
-    /* 计算文章打开方式 */
-    if ($file_url == '')
-    {
-        $open_type = 0;
-    }
-    else
-    {
-        $open_type = $_POST['FCKeditor1'] == '' ? 1 : 2;
-    }
-
-    /* 如果 file_url 跟以前不一样，且原来的文件是本地文件，删除原来的文件 */
-    $sql = "SELECT file_url FROM " . $ecs->table('article') . " WHERE article_id = '$_POST[id]'";
-    $old_url = $db->getOne($sql);
-    if ($old_url != '' && $old_url != $file_url && strpos($old_url, 'http://') === false && strpos($old_url, 'https://') === false)
-    {
-        @unlink(ROOT_PATH . $old_url);
-    }
-
-    if ($exc->edit("title='$_POST[title]', cat_id='$_POST[article_cat]', article_type='$_POST[article_type]', is_open='$_POST[is_open]', author='$_POST[author]', author_email='$_POST[author_email]', keywords ='$_POST[keywords]', file_url ='$file_url', open_type='$open_type', content='$_POST[FCKeditor1]', link='$_POST[link_url]', description = '$_POST[description]'", $_POST['id']))
-    {
-        $link[0]['text'] = $_LANG['back_list'];
-        $link[0]['href'] = 'article.php?act=list&' . list_link_postfix();
-
-        $note = sprintf($_LANG['articleedit_succeed'], stripslashes($_POST['title']));
-        admin_log($_POST['title'], 'edit', 'article');
-
-        clear_cache_files();
-
-        sys_msg($note, 0, $link);
-    }
-    else
-    {
-        die($db->error());
-    }
+    return $row;
 }
 
-/*------------------------------------------------------ */
-//-- 编辑文章主题
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'edit_title')
+/**
+ * 获得文章关联的商品
+ *
+ * @access  public
+ * @param   integer $id
+ * @return  array
+ */
+function article_related_goods($id)
 {
-    check_authz_json('article_manage');
+    $sql = 'SELECT g.goods_id, g.goods_name, g.goods_thumb, g.goods_img, g.shop_price AS org_price, ' .
+                "IFNULL(mp.user_price, g.shop_price * '$_SESSION[discount]') AS shop_price, ".
+                'g.market_price, g.promote_price, g.promote_start_date, g.promote_end_date ' .
+            'FROM ' . $GLOBALS['ecs']->table('goods_article') . ' ga ' .
+            'LEFT JOIN ' . $GLOBALS['ecs']->table('goods') . ' AS g ON g.goods_id = ga.goods_id ' .
+            "LEFT JOIN " . $GLOBALS['ecs']->table('member_price') . " AS mp ".
+                    "ON mp.goods_id = g.goods_id AND mp.user_rank = '$_SESSION[user_rank]' ".
+            "WHERE ga.article_id = '$id' AND g.is_on_sale = 1 AND g.is_alone_sale = 1 AND g.is_delete = 0";
+    $res = $GLOBALS['db']->query($sql);
 
-    $id    = intval($_POST['id']);
-    $title = json_str_iconv(trim($_POST['val']));
+    $arr = array();
+    while ($row = $GLOBALS['db']->fetchRow($res))
+    {
+        $arr[$row['goods_id']]['goods_id']      = $row['goods_id'];
+        $arr[$row['goods_id']]['goods_name']    = $row['goods_name'];
+        $arr[$row['goods_id']]['short_name']   = $GLOBALS['_CFG']['goods_name_length'] > 0 ?
+            sub_str($row['goods_name'], $GLOBALS['_CFG']['goods_name_length']) : $row['goods_name'];
+        $arr[$row['goods_id']]['goods_thumb']   = get_image_path($row['goods_id'], $row['goods_thumb'], true);
+        $arr[$row['goods_id']]['goods_img']     = get_image_path($row['goods_id'], $row['goods_img']);
+        $arr[$row['goods_id']]['market_price']  = price_format($row['market_price']);
+        $arr[$row['goods_id']]['shop_price']    = price_format($row['shop_price']);
+        $arr[$row['goods_id']]['url']           = build_uri('goods', array('gid' => $row['goods_id']), $row['goods_name']);
 
-    /* 检查文章标题是否重复 */
-    if ($exc->num("title", $title, $id) != 0)
-    {
-        make_json_error(sprintf($_LANG['title_exist'], $title));
-    }
-    else
-    {
-        if ($exc->edit("title = '$title'", $id))
+        if ($row['promote_price'] > 0)
         {
-            clear_cache_files();
-            admin_log($title, 'edit', 'article');
-            make_json_result(stripslashes($title));
+            $arr[$row['goods_id']]['promote_price'] = bargain_price($row['promote_price'], $row['promote_start_date'], $row['promote_end_date']);
+            $arr[$row['goods_id']]['formated_promote_price'] = price_format($arr[$row['goods_id']]['promote_price']);
         }
         else
         {
-            make_json_error($db->error());
-        }
-    }
-}
-
-/*------------------------------------------------------ */
-//-- 切换是否显示
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'toggle_show')
-{
-    check_authz_json('article_manage');
-
-    $id     = intval($_POST['id']);
-    $val    = intval($_POST['val']);
-
-    $exc->edit("is_open = '$val'", $id);
-    clear_cache_files();
-
-    make_json_result($val);
-}
-
-/*------------------------------------------------------ */
-//-- 切换文章重要性
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'toggle_type')
-{
-    check_authz_json('article_manage');
-
-    $id     = intval($_POST['id']);
-    $val    = intval($_POST['val']);
-
-    $exc->edit("article_type = '$val'", $id);
-    clear_cache_files();
-
-    make_json_result($val);
-}
-
-
-
-/*------------------------------------------------------ */
-//-- 删除文章主题
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'remove')
-{
-    check_authz_json('article_manage');
-
-    $id = intval($_GET['id']);
-
-    /* 删除原来的文件 */
-    $sql = "SELECT file_url FROM " . $ecs->table('article') . " WHERE article_id = '$id'";
-    $old_url = $db->getOne($sql);
-    if ($old_url != '' && strpos($old_url, 'http://') === false && strpos($old_url, 'https://') === false)
-    {
-        @unlink(ROOT_PATH . $old_url);
-    }
-
-    $name = $exc->get_name($id);
-    if ($exc->drop($id))
-    {
-        $db->query("DELETE FROM " . $ecs->table('comment') . " WHERE " . "comment_type = 1 AND id_value = $id");
-        
-        admin_log(addslashes($name),'remove','article');
-        clear_cache_files();
-    }
-
-    $url = 'article.php?act=query&' . str_replace('act=remove', '', $_SERVER['QUERY_STRING']);
-
-    ecs_header("Location: $url\n");
-    exit;
-}
-
-/*------------------------------------------------------ */
-//-- 将商品加入关联
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'add_link_goods')
-{
-    include_once(ROOT_PATH . 'includes/cls_json.php');
-    $json = new JSON;
-
-    check_authz_json('article_manage');
-
-    $add_ids = $json->decode($_GET['add_ids']);
-    $args = $json->decode($_GET['JSON']);
-    $article_id = $args[0];
-
-    if ($article_id == 0)
-    {
-        $article_id = $db->getOne('SELECT MAX(article_id)+1 AS article_id FROM ' .$ecs->table('article'));
-    }
-
-    foreach ($add_ids AS $key => $val)
-    {
-        $sql = 'INSERT INTO ' . $ecs->table('goods_article') . ' (goods_id, article_id) '.
-               "VALUES ('$val', '$article_id')";
-        $db->query($sql, 'SILENT') or make_json_error($db->error());
-    }
-
-    /* 重新载入 */
-    $arr = get_article_goods($article_id);
-    $opt = array();
-
-    foreach ($arr AS $key => $val)
-    {
-        $opt[] = array('value'  => $val['goods_id'],
-                        'text'  => $val['goods_name'],
-                        'data'  => '');
-    }
-
-    make_json_result($opt);
-}
-
-/*------------------------------------------------------ */
-//-- 将商品删除关联
-/*------------------------------------------------------ */
-elseif ($_REQUEST['act'] == 'drop_link_goods')
-{
-    include_once(ROOT_PATH . 'includes/cls_json.php');
-    $json = new JSON;
-
-    check_authz_json('article_manage');
-
-    $drop_goods     = $json->decode($_GET['drop_ids']);
-    $arguments      = $json->decode($_GET['JSON']);
-    $article_id     = $arguments[0];
-
-    if ($article_id == 0)
-    {
-        $article_id = $db->getOne('SELECT MAX(article_id)+1 AS article_id FROM ' .$ecs->table('article'));
-    }
-
-    $sql = "DELETE FROM " . $ecs->table('goods_article').
-            " WHERE article_id = '$article_id' AND goods_id " .db_create_in($drop_goods);
-    $db->query($sql, 'SILENT') or make_json_error($db->error());
-
-    /* 重新载入 */
-    $arr = get_article_goods($article_id);
-    $opt = array();
-
-    foreach ($arr AS $key => $val)
-    {
-        $opt[] = array('value'  => $val['goods_id'],
-                        'text'  => $val['goods_name'],
-                        'data'  => '');
-    }
-
-    make_json_result($opt);
-}
-
-/*------------------------------------------------------ */
-//-- 搜索商品
-/*------------------------------------------------------ */
-if ($_REQUEST['act'] == 'get_goods_list')
-{
-    include_once(ROOT_PATH . 'includes/cls_json.php');
-    $json = new JSON;
-
-    $filters = $json->decode($_GET['JSON']);
-
-    $arr = get_goods_list($filters);
-    $opt = array();
-
-    foreach ($arr AS $key => $val)
-    {
-        $opt[] = array('value' => $val['goods_id'],
-                        'text' => $val['goods_name'],
-                        'data' => $val['shop_price']);
-    }
-
-    make_json_result($opt);
-}
-/*------------------------------------------------------ */
-//-- 批量操作
-/*------------------------------------------------------ */
-
-elseif ($_REQUEST['act'] == 'batch')
-{
-    /* 批量删除 */
-    if (isset($_POST['type']))
-    {
-        if ($_POST['type'] == 'button_remove')
-        {
-            admin_priv('article_manage');
-
-            if (!isset($_POST['checkboxes']) || !is_array($_POST['checkboxes']))
-            {
-                sys_msg($_LANG['no_select_article'], 1);
-            }
-
-            /* 删除原来的文件 */
-            $sql = "SELECT file_url FROM " . $ecs->table('article') .
-                    " WHERE article_id " . db_create_in(join(',', $_POST['checkboxes'])) .
-                    " AND file_url <> ''";
-
-            $res = $db->query($sql);
-            while ($row = $db->fetchRow($res))
-            {
-                $old_url = $row['file_url'];
-                if (strpos($old_url, 'http://') === false && strpos($old_url, 'https://') === false)
-                {
-                    @unlink(ROOT_PATH . $old_url);
-                }
-            }
-
-            foreach ($_POST['checkboxes'] AS $key => $id)
-            {
-                if ($exc->drop($id))
-                {
-                    $name = $exc->get_name($id);
-                    admin_log(addslashes($name),'remove','article');
-                }
-            }
-
-        }
-
-        /* 批量隐藏 */
-        if ($_POST['type'] == 'button_hide')
-        {
-            check_authz_json('article_manage');
-            if (!isset($_POST['checkboxes']) || !is_array($_POST['checkboxes']))
-            {
-                sys_msg($_LANG['no_select_article'], 1);
-            }
-
-            foreach ($_POST['checkboxes'] AS $key => $id)
-            {
-              $exc->edit("is_open = '0'", $id);
-            }
-        }
-
-        /* 批量显示 */
-        if ($_POST['type'] == 'button_show')
-        {
-            check_authz_json('article_manage');
-            if (!isset($_POST['checkboxes']) || !is_array($_POST['checkboxes']))
-            {
-                sys_msg($_LANG['no_select_article'], 1);
-            }
-
-            foreach ($_POST['checkboxes'] AS $key => $id)
-            {
-              $exc->edit("is_open = '1'", $id);
-            }
-        }
-
-        /* 批量移动分类 */
-        if ($_POST['type'] == 'move_to')
-        {
-            check_authz_json('article_manage');
-            if (!isset($_POST['checkboxes']) || !is_array($_POST['checkboxes']) )
-            {
-                sys_msg($_LANG['no_select_article'], 1);
-            }
-
-            if(!$_POST['target_cat'])
-            {
-                sys_msg($_LANG['no_select_act'], 1);
-            }
-            
-            foreach ($_POST['checkboxes'] AS $key => $id)
-            {
-              $exc->edit("cat_id = '".$_POST['target_cat']."'", $id);
-            }
+            $arr[$row['goods_id']]['promote_price'] = 0;
         }
     }
 
-    /* 清除缓存 */
-    clear_cache_files();
-    $lnk[] = array('text' => $_LANG['back_list'], 'href' => 'article.php?act=list');
-    sys_msg($_LANG['batch_handle_ok'], 0, $lnk);
-}
-
-/* 把商品删除关联 */
-function drop_link_goods($goods_id, $article_id)
-{
-    $sql = "DELETE FROM " . $GLOBALS['ecs']->table('goods_article') .
-            " WHERE goods_id = '$goods_id' AND article_id = '$article_id' LIMIT 1";
-    $GLOBALS['db']->query($sql);
-    create_result(true, '', $goods_id);
-}
-
-/* 取得文章关联商品 */
-function get_article_goods($article_id)
-{
-    $list = array();
-    $sql  = 'SELECT g.goods_id, g.goods_name'.
-            ' FROM ' . $GLOBALS['ecs']->table('goods_article') . ' AS ga'.
-            ' LEFT JOIN ' . $GLOBALS['ecs']->table('goods') . ' AS g ON g.goods_id = ga.goods_id'.
-            " WHERE ga.article_id = '$article_id'";
-    $list = $GLOBALS['db']->getAll($sql);
-
-    return $list;
-}
-
-/* 获得文章列表 */
-function get_articleslist()
-{
-    $result = get_filter();
-    if ($result === false)
-    {
-        $filter = array();
-        $filter['keyword']    = empty($_REQUEST['keyword']) ? '' : trim($_REQUEST['keyword']);
-        if (isset($_REQUEST['is_ajax']) && $_REQUEST['is_ajax'] == 1)
-        {
-            $filter['keyword'] = json_str_iconv($filter['keyword']);
-        }
-        $filter['cat_id'] = empty($_REQUEST['cat_id']) ? 0 : intval($_REQUEST['cat_id']);
-        $filter['sort_by']    = empty($_REQUEST['sort_by']) ? 'a.article_id' : trim($_REQUEST['sort_by']);
-        $filter['sort_order'] = empty($_REQUEST['sort_order']) ? 'DESC' : trim($_REQUEST['sort_order']);
-
-        $where = '';
-        if (!empty($filter['keyword']))
-        {
-            $where = " AND a.title LIKE '%" . mysql_like_quote($filter['keyword']) . "%'";
-        }
-        if ($filter['cat_id'])
-        {
-            $where .= " AND a." . get_article_children($filter['cat_id']);
-        }
-
-        /* 文章总数 */
-        $sql = 'SELECT COUNT(*) FROM ' .$GLOBALS['ecs']->table('article'). ' AS a '.
-               'LEFT JOIN ' .$GLOBALS['ecs']->table('article_cat'). ' AS ac ON ac.cat_id = a.cat_id '.
-               'WHERE 1 ' .$where;
-        $filter['record_count'] = $GLOBALS['db']->getOne($sql);
-
-        $filter = page_and_size($filter);
-
-        /* 获取文章数据 */
-        $sql = 'SELECT a.* , ac.cat_name '.
-               'FROM ' .$GLOBALS['ecs']->table('article'). ' AS a '.
-               'LEFT JOIN ' .$GLOBALS['ecs']->table('article_cat'). ' AS ac ON ac.cat_id = a.cat_id '.
-               'WHERE 1 ' .$where. ' ORDER by '.$filter['sort_by'].' '.$filter['sort_order'];
-
-        $filter['keyword'] = stripslashes($filter['keyword']);
-        set_filter($filter, $sql);
-    }
-    else
-    {
-        $sql    = $result['sql'];
-        $filter = $result['filter'];
-    }
-    $arr = array();
-    $res = $GLOBALS['db']->selectLimit($sql, $filter['page_size'], $filter['start']);
-
-    while ($rows = $GLOBALS['db']->fetchRow($res))
-    {
-        $rows['date'] = local_date($GLOBALS['_CFG']['time_format'], $rows['add_time']);
-
-        $arr[] = $rows;
-    }
-    return array('arr' => $arr, 'filter' => $filter, 'page_count' => $filter['page_count'], 'record_count' => $filter['record_count']);
-}
-
-/* 上传文件 */
-function upload_article_file($upload)
-{
-    if (!make_dir("../" . DATA_DIR . "/article"))
-    {
-        /* 创建目录失败 */
-        return false;
-    }
-
-    $filename = cls_image::random_filename() . substr($upload['name'], strpos($upload['name'], '.'));
-    $path     = ROOT_PATH. DATA_DIR . "/article/" . $filename;
-
-    if (move_upload_file($upload['tmp_name'], $path))
-    {
-        return DATA_DIR . "/article/" . $filename;
-    }
-    else
-    {
-        return false;
-    }
+    return $arr;
 }
 
 ?>
